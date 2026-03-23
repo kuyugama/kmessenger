@@ -7,6 +7,8 @@ import blessed
 from src.client import Client
 
 from window import Window, fill_message
+from components import Colored, Bold, Italic, Underline, Text, serialize, deserialize
+from md import parse as parse_md
 import util
 
 t = blessed.Terminal()
@@ -64,7 +66,7 @@ def messages_lookup():
 
             for message in recv:
                 window.messages.append(
-                    t.orange(receiver_name) + ": " + t.yellow(message.decode())
+                    Colored("orange", receiver_name) + ": " + deserialize(message)
                 )
         except ValueError as e:
             if e.args[0] == "No sender":
@@ -80,6 +82,35 @@ lookup.start()
 window.non_blocking_draw()
 
 
+COMMANDS = {
+    "refreshkey": "Refresh encryption keys with the server",
+    "help": "Show available commands",
+}
+
+
+def handle_command(command: str):
+    match command:
+        case "refreshkey":
+            try:
+                client.refresh_key()
+                window.messages.append(Colored("cyan", "Keys refreshed successfully"))
+            except ValueError as e:
+                window.messages.append(Colored("darkred", "Error") + ": " + Colored("red", str(e)))
+
+        case "help":
+            for name, description in COMMANDS.items():
+                window.messages.append(
+                    Colored("cyan", f"/{name}") + " — " + Colored("yellow", description)
+                )
+
+        case _:
+            window.messages.append(
+                Colored("darkred", "Unknown command: ")
+                + Colored("red", f"/{command}")
+                + Colored("darkred", ". Type /help to see available commands.")
+            )
+
+
 while True:
     try:
         message = window.input()
@@ -88,12 +119,16 @@ while True:
         util.print(t.move_xy(0, t.height) + t.green(fill_message("Goodbye!")))
         time.sleep(0.5)
         exit()
-    data = message.encode()
+
+    if message.startswith("/"):
+        handle_command(message[1:].strip())
+        continue
 
     try:
-        client.send_message(receiver, data)
-        window.messages.append(t.green("You") + ": " + t.darkgreen(message))
+        parsed = parse_md(message)
+        client.send_message(receiver, serialize(parsed))
+        window.messages.append(Colored("green", "You") + ": " + parsed)
     except ValueError as e:
-        window.messages.append(t.darkred("Error") + ": " + t.red(e.args[0]))
+        window.messages.append(Colored("darkred", "Error") + ": " + Colored("red", e.args[0]))
         if e.args[0] == "No receiver":
             window.receiver_online = False

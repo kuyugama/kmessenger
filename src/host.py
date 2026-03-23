@@ -8,11 +8,11 @@ from src.codes import Codes
 from src.stage import Stage
 from src import util
 
-from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 
 
 class ClientCredentials(typing.TypedDict):
-    private_key: RSAPrivateKey | None
+    private_key: X25519PrivateKey | None
 
     symmetric_key: bytes | None
     symmetric_iv: bytes | None
@@ -71,27 +71,28 @@ class Host:
 
         if client_info["stage"] == Stage.connection:
             # print(f"{address_format} connected")
-            private = util.asymmetric_key()
+            private = util.x25519_private_key()
 
             creds["private_key"] = private
 
             util.send_message(
-                client, util.public_key_to_bytes(private.public_key())
+                client, util.x25519_public_key_to_bytes(private.public_key())
             )
 
-            client_info["stage"] = Stage.rsa
+            client_info["stage"] = Stage.x25519
 
             util.send_message(client, Codes.ok.encode())
             return
 
-        if client_info["stage"] == Stage.rsa:
-            # print(f"{address_format} rsa keypaired")
+        if client_info["stage"] == Stage.x25519:
+            # print(f"{address_format} x25519 key exchanged")
 
-            data = util.rsa_decrypt(
-                creds["private_key"], util.wait_event(client).data
+            client_pub = util.x25519_public_key_from_bytes(
+                util.wait_event(client).data
             )
 
-            iv, key = data[:16], data[16:]
+            shared_secret = creds["private_key"].exchange(client_pub)
+            key, iv = util.derive_symmetric_keys(shared_secret)
 
             creds["symmetric_key"] = key
             creds["symmetric_iv"] = iv
@@ -153,6 +154,15 @@ class Host:
         if command == Commands.ping:
             # print(f"{address_format} pong")
             util.send_message(client, Codes.ok.encode())
+            return
+
+        if command == Commands.reset_keys:
+            private = util.x25519_private_key()
+            creds["private_key"] = private
+            util.send_message(
+                client, util.x25519_public_key_to_bytes(private.public_key())
+            )
+            client_info["stage"] = Stage.x25519
             return
 
         if command == Commands.send_message:

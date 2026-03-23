@@ -23,21 +23,24 @@ class Client:
     def start(self):
         self._socket.connect((self.host, self.port))
 
-        public_key_bytes = util.wait_event(self._socket).data
+        server_pub_bytes = util.wait_event(self._socket).data
 
         code = Codes.decode(util.wait_event(self._socket).data)
 
         if code != Codes.ok:
             raise ValueError(
-                f"Cannot setup rsa encryption: Server respond with non-ok code: {code}"
+                f"Cannot setup x25519 exchange: Server respond with non-ok code: {code}"
             )
 
-        public_key = util.public_key_from_bytes(public_key_bytes)
+        private = util.x25519_private_key()
+        server_pub = util.x25519_public_key_from_bytes(server_pub_bytes)
+        shared_secret = private.exchange(server_pub)
+        self._key, self._iv = util.derive_symmetric_keys(shared_secret)
+        key, iv = self._key, self._iv
 
-        self._key = key = util.symmetric_key()
-        self._iv = iv = util.symmetric_iv()
-
-        util.send_message(self._socket, util.rsa_encrypt(public_key, iv + key))
+        util.send_message(
+            self._socket, util.x25519_public_key_to_bytes(private.public_key())
+        )
 
         data = util.wait_event(self._socket).data
 
@@ -133,6 +136,34 @@ class Client:
                 )
 
             return messages
+
+    def refresh_key(self):
+        with self.lock:
+            command = util.pack_command(Commands.reset_keys)
+            util.send_message(
+                self._socket, util.aes_encrypt(self._key, self._iv, command)
+            )
+
+            server_pub_bytes = util.wait_event(self._socket).data
+            private = util.x25519_private_key()
+            shared_secret = private.exchange(
+                util.x25519_public_key_from_bytes(server_pub_bytes)
+            )
+            new_key, new_iv = util.derive_symmetric_keys(shared_secret)
+
+            util.send_message(
+                self._socket, util.x25519_public_key_to_bytes(private.public_key())
+            )
+
+            data = util.wait_event(self._socket).data
+            code = Codes.decode(data)
+
+            if code != Codes.ok:
+                raise ValueError(
+                    f"Cannot refresh keys: Server respond with non-ok code: {code}"
+                )
+
+            self._key, self._iv = new_key, new_iv
 
     def stop(self):
         with self.lock:

@@ -6,54 +6,35 @@ import typing
 import os
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives.asymmetric import rsa, padding
-from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
 
-from cryptography.hazmat.primitives.asymmetric.rsa import (
-    RSAPrivateKey,
-    RSAPublicKey,
-)
+
+def x25519_private_key() -> X25519PrivateKey:
+    return X25519PrivateKey.generate()
 
 
-def asymmetric_key() -> rsa.RSAPrivateKey:
-    return rsa.generate_private_key(
-        public_exponent=65537,
-        key_size=2048,
-    )
-
-
-def public_key_from_bytes(key: bytes) -> RSAPublicKey:
-    return serialization.load_der_public_key(key)
-
-
-def public_key_to_bytes(key: RSAPublicKey) -> bytes:
+def x25519_public_key_to_bytes(key: X25519PublicKey) -> bytes:
     return key.public_bytes(
-        encoding=serialization.Encoding.DER,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
     )
 
 
-def rsa_encrypt(public_key: RSAPublicKey, message: bytes) -> bytes:
-    return public_key.encrypt(
-        message,
-        padding.OAEP(
-            padding.MGF1(algorithm=hashes.SHA256()),
-            algorithm=hashes.SHA256(),
-            label=None,
-        ),
-    )
+def x25519_public_key_from_bytes(data: bytes) -> X25519PublicKey:
+    return X25519PublicKey.from_public_bytes(data)
 
 
-def rsa_decrypt(private_key: RSAPrivateKey, message: bytes) -> bytes:
-    return private_key.decrypt(
-        message,
-        padding.OAEP(
-            padding.MGF1(algorithm=hashes.SHA256()),
-            algorithm=hashes.SHA256(),
-            label=None,
-        ),
-    )
+def derive_symmetric_keys(shared_secret: bytes) -> tuple[bytes, bytes]:
+    material = HKDF(
+        algorithm=hashes.SHA256(),
+        length=48,
+        salt=None,
+        info=b"kmessenger",
+    ).derive(shared_secret)
+    return material[:32], material[32:]  # key, iv
 
 
 def symmetric_key() -> bytes:

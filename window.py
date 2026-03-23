@@ -38,7 +38,7 @@ class Window:
         self.receiver = receiver
         self.receiver_online = receiver_online
 
-        self.messages: list[str] = []
+        self.messages: list = []
 
         self._input = ""
         self._cursor = 0
@@ -63,7 +63,7 @@ class Window:
         total_lines = 0
         remove_before = 0
         for index, message in enumerate(self.messages[::-1]):
-            message_lines = t.length(fill_message(message)) / t.width
+            message_lines = t.length(fill_message(str(message))) / t.width
             total_lines += message_lines
 
             if total_lines >= max_height:
@@ -94,35 +94,62 @@ class Window:
         self.cleanup_messages()
 
         max_height = t.height - 2
-
+        bg = str(t.on_gray10) + str(t.snow)
+        normal = str(t.normal)
         lines = ""
 
         for message in self.messages:
-            lines += fill_message(message)
+            raw_parts = list(
+                itertools.chain(
+                    *map(lambda p: t.wrap(p, width=t.width), str(message).split("\n"))
+                )
+            ) or [""]
+
+            for part in raw_parts:
+                part_len = t.length(part)
+                padding = " " * max(0, t.width - part_len)
+                # Re-inject bg after every reset within the content
+                content = (bg + part).replace(normal, normal + bg)
+                # Padding is explicitly wrapped in on_gray10 to guarantee background
+                lines += content + t.on_gray10(padding)
 
         lines_count = t.length(lines) // t.width
         if lines_count < max_height:
-            lines += " " * t.width * (max_height - lines_count)
+            lines += t.on_gray10(" " * t.width * (max_height - lines_count))
 
-        return t.on_gray10(lines)
+        return lines
 
     def render_prompt(self) -> str:
-        prompt = t.move_xy(0, t.height) + ">>> "
+        prefix = ">>> "
+        prompt_start = t.move_xy(0, t.height) + prefix
 
         if self._input == "":
-            prompt += (
+            return prompt_start + (
                 t.save + t.gray(t.on_cyan("T") + "ype something...") + t.restore
             )
-            return prompt
 
-        for i, char in enumerate(self._input):
+        available = t.width - len(prefix) - 1
+        input_len = len(self._input)
+
+        if input_len <= available:
+            view_start, view_end = 0, input_len
+        else:
+            half = available // 2
+            view_start = max(0, self._cursor - half)
+            view_end = view_start + available
+            if view_end > input_len:
+                view_end = input_len
+                view_start = max(0, view_end - available)
+
+        prompt = prompt_start
+        for i in range(view_start, view_end):
+            char = self._input[i]
             if i == self._cursor:
                 prompt += t.yellow_on_cyan(char)
-                continue
+            else:
+                prompt += t.yellow(char)
 
-            prompt += t.yellow(char)
-
-        if self._cursor == len(self._input):
+        if self._cursor == view_end:
             prompt += t.on_cyan(" ")
 
         return prompt
